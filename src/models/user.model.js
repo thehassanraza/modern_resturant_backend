@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema(
   {
+    paymentCustomerId: {
+      type: String,
+    },
     // Basic Info (required)
     name: {
       type: String,
@@ -40,6 +43,8 @@ const userSchema = new mongoose.Schema(
       state: { type: String, trim: true },
       zip: { type: String, trim: true },
       country: { type: String, trim: true },
+      latitude: { type: String, trim: true },
+      longitude: { type: String, trim: true },
       landmark: { type: String, trim: true },
       note: { type: String, trim: true }
     },
