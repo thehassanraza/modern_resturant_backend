@@ -17,30 +17,11 @@ dotenv.config();
 // Get User profile
 exports.getUserProfile = async (req, res) => {
     try {
-        // user info is already attached by auth middleware
-        const userId = req.user?._id;
-
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized access. User authentication required.",
-                error: "UNAUTHORIZED"
-            });
-        }
-
-        const user = await UserModel.findById(userId).select('-password');
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found.",
-                error: "USER_NOT_FOUND"
-            });
-        }
-
+        
         return res.status(200).json({
             success: true,
             message: "User profile fetched successfully.",
-            user
+            user: req.user
         });
 
     } catch (error) {
@@ -53,20 +34,11 @@ exports.getUserProfile = async (req, res) => {
     }
 };
 
-
-
 // Update User profile (excluding role, password, email)
 exports.updateUserProfile = async (req, res) => {
     try {
         const userId = req.user?._id;
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized access. User authentication required.",
-                error: "UNAUTHORIZED"
-            });
-        }
-
+        
         const { 
             name, 
             phoneNumber, 
@@ -77,13 +49,7 @@ exports.updateUserProfile = async (req, res) => {
 
         // Fetch user from DB
         const user = await UserModel.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found.",
-                error: "USER_NOT_FOUND"
-            });
-        }
+        
 
         // Update fields if provided
         if (name) user.name = name.trim();
@@ -123,8 +89,6 @@ exports.updateUserProfile = async (req, res) => {
     }
 };
 
-
-
 //  add staff member
 exports.addStaffMember = async (req, res) => {
     try {
@@ -163,7 +127,12 @@ exports.addStaffMember = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Create staff member
-        const staffMember = new UserModel({ name, email, password: hashedPassword, profileImage });
+        const staffMember = new UserModel({ 
+            name, 
+            email, 
+            password: hashedPassword, 
+            profileImage 
+        });
         await staffMember.save();
 
         return res.status(201).json({
@@ -180,8 +149,7 @@ exports.addStaffMember = async (req, res) => {
     }
 }
 
-
-//get all users
+// get all users
 exports.getAllUsers = async (req, res) => {
     try {
         const currentUserId = req.user?._id;
@@ -189,32 +157,31 @@ exports.getAllUsers = async (req, res) => {
             return res.status(401).json({ success: false, message: 'Unauthorized access.' });
         }
 
-        // Query parameters
         const {
-            search = '',        // search string
-            sortBy = 'createdAt', // field to sort
-            order = 'desc',       // asc or desc
-            page = 1,            // page number
-            limit = 10           // page size
+            search = '',
+            role,           // optional role filter
+            sortBy = 'createdAt',
+            order = 'desc',
+            page = 1,
+            limit = 10
         } = req.query;
 
         const pageNumber = parseInt(page, 10);
         const pageSize = parseInt(limit, 10);
 
-        // Build search query
-        const searchRegex = new RegExp(search, 'i'); // case-insensitive
+        const searchRegex = new RegExp(search, 'i');
 
-        // Aggregate to search role fields too
-        const query = [
-            {
-                $match: {
-                    _id: { $ne: currentUserId }, // exclude current user
-                    isSuperAdmin: false          // exclude super admin
-                }
-            },
+        // Base match conditions
+        const matchConditions = {
+            _id: { $ne: mongoose.Types.ObjectId(currentUserId) },
+            isSuperAdmin: false
+        };
+
+        // Aggregation pipeline
+        const pipeline = [
             {
                 $lookup: {
-                    from: 'roles', // collection name in MongoDB
+                    from: 'roles',
                     localField: 'role',
                     foreignField: '_id',
                     as: 'roleInfo'
@@ -225,30 +192,47 @@ exports.getAllUsers = async (req, res) => {
                     path: '$roleInfo',
                     preserveNullAndEmptyArrays: true
                 }
-            },
-            {
-                $match: {
-                    $or: [
-                        { name: searchRegex },
-                        { email: searchRegex },
-                        { phoneNumber: searchRegex },
-                        { 'roleInfo.name': searchRegex },
-                        { 'roleInfo.permissions': searchRegex }
-                    ]
-                }
-            },
-            {
-                $sort: { [sortBy]: order === 'asc' ? 1 : -1 }
-            },
-            {
-                $facet: {
-                    data: [{ $skip: (pageNumber - 1) * pageSize }, { $limit: pageSize }],
-                    totalCount: [{ $count: 'count' }]
-                }
             }
         ];
 
-        const result = await UserModel.aggregate(query);
+        // If role filter is provided, add it
+        if (role) {
+            matchConditions['roleInfo.name'] = role;
+        }
+
+        // Add search filter
+        pipeline.push({
+            $match: {
+                ...matchConditions,
+                $or: [
+                    { name: searchRegex },
+                    { email: searchRegex },
+                    { phoneNumber: searchRegex },
+                    { 'roleInfo.name': searchRegex },
+                    { 'roleInfo.permissions': searchRegex }
+                ]
+            }
+        });
+
+        // Determine sort field
+        const sortField = sortBy.toLowerCase() === 'role' ? 'roleInfo.name' : sortBy;
+
+        pipeline.push({
+            $sort: { [sortField]: order.toLowerCase() === 'asc' ? 1 : -1 }
+        });
+
+        // Pagination and total count
+        pipeline.push({
+            $facet: {
+                data: [
+                    { $skip: (pageNumber - 1) * pageSize },
+                    { $limit: pageSize }
+                ],
+                totalCount: [{ $count: 'count' }]
+            }
+        });
+
+        const result = await UserModel.aggregate(pipeline);
 
         const users = result[0]?.data || [];
         const totalCount = result[0]?.totalCount[0]?.count || 0;
@@ -273,3 +257,36 @@ exports.getAllUsers = async (req, res) => {
         });
     }
 };
+
+//active inactive user toggle
+exports.activeInactiveUserToggle = async (req, res) => {
+    try {
+        const userId  = req.params.userId;
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "User ID is required."
+            });
+        }
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+        user.isActive = !user.isActive;
+        await user.save();
+        return res.status(200).json({
+            success: true,
+            message: `user ${user.isActive ? 'activated' : 'deactivated'} successfully.`
+        });
+    } catch (error) {
+        console.error("Error in activeInactiveUserToggle:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later."
+        });
+    }
+}
+

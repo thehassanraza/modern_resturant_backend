@@ -13,7 +13,7 @@ dotenv.config();
 
 
 // Generate JWT token
-const generateToken = (id) => {
+const generateToken = (id) => { 
     return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 };
 
@@ -77,6 +77,8 @@ exports.registerAdmin = async (req, res) => {
 
 
 
+
+
 // Login User
 exports.loginUser = async (req, res) => {
     try {
@@ -123,6 +125,7 @@ exports.loginUser = async (req, res) => {
     }
 };
 
+// request password reset
 exports.requestPasswordReset = async (req, res) => {
     try {
         const { email } = req.body;
@@ -194,7 +197,6 @@ exports.requestPasswordReset = async (req, res) => {
         });
     }
 };
-
 
 // verify OTP
 exports.verifyOtp = async (req, res) => {
@@ -320,8 +322,6 @@ exports.resetUserPassword = async (req, res) => {
     }
 };  
 
-
-
 // request customer account 
 exports.requestCustomerAccount = async (req, res) => {
     try {
@@ -407,9 +407,6 @@ exports.requestCustomerAccount = async (req, res) => {
     }
 };
 
-
-
-
 // register customer
 exports.registerCustomer = async (req, res) => {
     try {
@@ -491,6 +488,62 @@ exports.registerCustomer = async (req, res) => {
 
     } catch (error) {
         console.error("Error in registerCustomer:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later."
+        });
+    }
+};
+
+//change password
+exports.changePassword = async (req, res) => {
+    try {
+        const { email, currentPassword, newPassword } = req.body;
+        const userId = req.user?._id;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized access."
+            });
+        }
+
+        if (!email || !currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Email, current password, and new password are required."
+            });
+        }
+
+        // find user with userId
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        // check if current password is correct
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({
+                success: false,
+                message: "Current password is incorrect."
+            });
+        }
+
+        // hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedPassword;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Password changed successfully."
+        });
+
+    } catch (error) {
+         console.error("Error in changeCurrentPassword:", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later."
